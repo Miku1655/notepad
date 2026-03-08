@@ -1,605 +1,180 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>N-Pane Draft Workspace</title>
-<style>
-:root {
-    --bg:#f2f3f5;
-    --paper:#fafafa;
-    --border:#d6d6d6;
---font: system-ui,sans-serif;
-    --text:#2b2b2b;
-    --font-size:15px;
-    --radius:12px;
-    --padding:16px;
-    --pad-height:260px;
-}
-*{box-sizing:border-box}
-body {margin:0;padding:20px;background:var(--bg);color:var(--text);font-family:var(--font);}
-h1 {font-weight:400;margin:0 0 14px;outline:none;}
-#controls {display:grid;grid-template-columns: repeat(auto-fill,minmax(400px,1fr));gap:10px;background:#fff;padding:14px;border-radius:12px;border:1px solid var(--border);overflow:hidden;transition: all 0.3s ease;}
-#controls.hidden {max-height:0;padding:0;opacity:0;border:none;}
-fieldset {border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:8px;display: grid;grid-template-columns: repeat(auto-fill,minmax(120px,1fr));gap:6px;}
-legend {font-size:12px;font-weight:bold;padding:0 4px;}
-label {font-size:12px;color:#555;display:flex;flex-direction:column;gap:4px;}
-input,select,button {font-size:13px;padding:4px 6px;}
-input:focus, select:focus, button:focus, textarea:focus {outline:2px solid #888;}
-button{cursor:pointer}
-.grid{display:grid;gap:16px;margin-top:20px;transition: all 0.3s ease;}
-.pad {position: relative;height: var(--pad-height);display: flex;flex-direction: column;overflow: hidden; border-radius: var(--radius); border: var(--pad-border-width,1px) solid var(--border);opacity: 0;transform: translateY(10px);transition: opacity 0.25s, transform 0.25s, border 0.25s;}
-.pad.show {opacity:1; transform: translateY(0);}
-textarea {width:100%;flex:1;resize:none;padding:var(--padding);border:none;border-radius:0;background:var(--paper);color:var(--text);font-size:var(--font-size);font-family:var(--font);line-height:1.6;overflow:auto;transition: background 0.3s, color 0.3s, border-color 0.3s;}
-textarea::-webkit-scrollbar {width:6px;}
-textarea::-webkit-scrollbar-track {background: transparent;}
-textarea::-webkit-scrollbar-thumb {background: rgba(0,0,0,0.2);border-radius:3px;}
-textarea::-webkit-scrollbar-thumb:hover {background: rgba(0,0,0,0.4);}
-.pad-label {position:absolute;top:6px;right:10px;font-size:11px;color:#888;pointer-events:none;}
-#controlsToggle {position:fixed;top:20px;right:20px;width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:#fff;color:#555;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.15);opacity:0.7;transition:opacity 0.2s, transform 0.2s;z-index:1000;}
-#controlsToggle:hover{opacity:1;transform:scale(1.1);}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>N-Pane Draft Workspace</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1 contenteditable="true">N-Pane Draft Workspace</h1>
-<section id="controls">
-  <!-- STRUCTURE -->
-  <fieldset>
-    <legend>Structure</legend>
-    <label>Columns<input type="number" id="columns" value="2"></label>
-    <label>Number of Pads<input type="number" id="pads" value="6"></label>
-    <label>Pad Height<input type="number" id="height" value="260"></label>
-  </fieldset>
-  <!-- VISUALS -->
-  <fieldset>
-    <legend>Visuals</legend>
-    <label>Font<select id="font">
-      <option value="system-ui,sans-serif">System</option>
-      <option value="Georgia,serif">Georgia</option>
-      <option value="Times New Roman,serif">Times</option>
-      <option value="monospace">Monospace</option>
-    </select></label>
-    <label>Font Size<input type="number" id="fontSize" value="15"></label>
-    <label>Text Color<input type="color" id="textColor" value="#2b2b2b"></label>
-    <label>Page Background<input type="color" id="bgColor" value="#f2f3f5"></label>
-    <label>Pad Background<input type="color" id="paperColor" value="#fafafa"></label>
-    <label>Border Color<input type="color" id="borderColor" value="#d6d6d6"></label>
-    <label>Pad Border Width<input type="number" id="borderWidth" value="1"></label>
-    <label>Padding<input type="number" id="padding" value="16"></label>
-    <label>Border Radius<input type="number" id="radius" value="12"></label>
-  </fieldset>
-  <!-- CONTENT & PRESETS -->
-  <fieldset>
-    <legend>Content & Presets</legend>
-    <label>Preset Name<input id="presetName"></label>
-    <label>Saved Presets<select id="presetList"></select></label>
-    <button id="savePreset">Save</button>
-    <button id="loadPreset">Load</button>
-    <button id="deletePreset">Delete</button>
-    <button id="exportWorkspace">Export JSON</button>
-    <input type="file" id="importFile" style="display:none;">
-    <button id="importWorkspace">Import JSON</button>
-    <button id="exportVisualPreset">Export Visual JSON</button>
-    <input type="file" id="importVisualFile" style="display:none;">
-    <button id="importVisualPreset">Import Visual JSON</button>
-    <button id="selectFolder">Select Presets Folder</button>
-<button id="resetAll">Reset All</button>
-  </fieldset>
-</section>
-<button id="controlsToggle" title="Toggle controls" aria-expanded="true">❤︎</button>
-<div id="grid" class="grid"></div>
-<script>
-const root=document.documentElement;
-const grid=document.getElementById("grid");
-const STATE_KEY="npane-workspace";
-const controlsPanel=document.getElementById("controls");
-const toggleBtn=document.getElementById("controlsToggle");
-let saveTimeouts={};
-document.body.style.background = "";
-// --- controls ---
-const controls={
-  font: document.getElementById("font"),
-  fontSize: document.getElementById("fontSize"),
-  textColor: document.getElementById("textColor"),
-  bgColor: document.getElementById("bgColor"),
-  paperColor: document.getElementById("paperColor"),
-  borderColor: document.getElementById("borderColor"),
-  borderWidth: document.getElementById("borderWidth"),
-  radius: document.getElementById("radius"),
-  padding: document.getElementById("padding"),
-  height: document.getElementById("height"),
-  columns: document.getElementById("columns"),
-  pads: document.getElementById("pads")
-};
-// --- IndexedDB helpers for persisting folder handle ---
-const DB_NAME = 'npaneDB';
-const STORE_NAME = 'handles';
-async function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    req.onsuccess = e => resolve(e.target.result);
-    req.onerror = e => reject(e.target.error);
-  });
-}
-async function saveHandle(name, handle) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.put(handle, name);
-    req.onsuccess = resolve;
-    req.onerror = reject;
-  });
-}
-async function getHandle(name) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.get(name);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = reject;
-  });
-}
-async function hasFolder() {
-  return !!await getHandle('presetsFolder');
-}
-const SETTINGS_SCHEMA = {
-  font: { css: "--font", unit: "", kind: "visual" },
-  fontSize: { css: "--font-size", unit: "px", kind: "visual" },
-  textColor: { css: "--text", unit: "", kind: "visual" },
-  bgColor: { css: "--bg", unit: "", kind: "visual" },
-  paperColor: { css: "--paper", unit: "", kind: "visual" },
-  borderColor: { css: "--border", unit: "", kind: "visual" },
-  borderWidth: { css: "--pad-border-width", unit: "px", kind: "visual" },
-  radius: { css: "--radius", unit: "px", kind: "visual" },
-  padding: { css: "--padding", unit: "px", kind: "visual" },
-  height: { css: "--pad-height", unit: "px", kind: "structural" },
-  columns: { kind: "structural" },
-  pads: { kind: "structural" }
-};
-// --- helpers ---
-function setVar(name,value,unit=""){root.style.setProperty(name,value+unit);}
-function applySetting(key, value) {
-  const def = SETTINGS_SCHEMA[key];
-  if (!def) return;
-  if (def.css) {
-    root.style.setProperty(def.css, value + (def.unit || ""));
-  }
-  if (key === "columns") {
-    grid.style.gridTemplateColumns = `repeat(${Math.max(1, value)},1fr)`;
-  }
-}
-function createPadElement(i,content=""){
-  const wrap=document.createElement("div");
-  wrap.className="pad";
-  const label=document.createElement("div");
-  label.className="pad-label";
-  label.textContent=`Pad ${i+1}`;
-  const ta=document.createElement("textarea");
-  ta.value=content;
-  ta.oninput=()=>{
-    scheduleSave();
-  };
-  wrap.append(label,ta);
-  wrap.style.overflow="auto";
-  return wrap;
-}
-function buildPads(count,contents=[]){
-  grid.innerHTML="";
-  for(let i=0;i<count;i++){
-    const pad=createPadElement(i,contents[i]||"");
-    grid.appendChild(pad);
-    requestAnimationFrame(()=>pad.classList.add("show"));
-  }
-}
-function reconcilePads(targetCount) {
-  const currentPads = [...grid.children];
-  const contents = currentPads.map(p => p.querySelector("textarea").value);
-  if (targetCount < currentPads.length) {
-    const toRemove = currentPads.slice(targetCount);
-    const hasText = toRemove.some(p => p.querySelector("textarea").value.trim());
-    if (hasText && !confirm("Reducing pads will delete text. Continue?")) {
-      controls.pads.value = currentPads.length;
-      return;
-    }
-    toRemove.forEach(p => p.remove());
-  }
-  for (let i = currentPads.length; i < targetCount; i++) {
-    const pad = createPadElement(i, contents[i] || "");
-    grid.appendChild(pad);
-    requestAnimationFrame(() => pad.classList.add("show"));
-  }
-}
-// --- workspace ---
-function collectWorkspace(){
-  return {
-    title: document.querySelector("h1").innerText,
-    settings: Object.fromEntries(
-      Object.keys(SETTINGS_SCHEMA).map(k => [k, controls[k].value])
-    ),
-    pads: [...document.querySelectorAll("textarea")].map(t => t.value)
-  };
-}
-function applyWorkspace(w, { applyVisuals = true } = {}) {
-  const titleEl = document.querySelector("h1");
-  titleEl.innerText = w.title || "N-Pane Draft Workspace";
-  // restore control values
-  if (w.settings) {
-    for (const [k, v] of Object.entries(w.settings)) {
-      if (controls[k]) controls[k].value = v;
-    }
-  }
-  // height first
-  applySetting("height", Number(controls.height.value));
-  // rebuild pads FIRST
-  buildPads(Number(controls.pads.value), w.pads || []);
-  // now apply columns (after DOM exists)
-  applySetting("columns", Number(controls.columns.value));
-  // visuals only if allowed
-  if (applyVisuals) {
-    applyVisualPreset2({ settings: w.settings });
-  }
-}
-let saveTimer;
-function scheduleSave() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveWorkspace, 300);
-}
-function saveWorkspace(){ localStorage.setItem(STATE_KEY,JSON.stringify(collectWorkspace())); }
-function loadWorkspace() {
-  const w = localStorage.getItem(STATE_KEY);
-  if (w) applyWorkspace(JSON.parse(w), { applyVisuals: true });
-  else buildPads(+controls.pads.value);
-}
-// --- toggle controls ---
-toggleBtn.onclick=()=>{
-  const hidden=controlsPanel.classList.toggle("hidden");
-  toggleBtn.setAttribute("aria-expanded",!hidden);
-  if(hidden) localStorage.setItem("npane-controls-hidden","1"); else localStorage.removeItem("npane-controls-hidden");
-};
-if(localStorage.getItem("npane-controls-hidden")) controlsPanel.classList.add("hidden");
-// --- title font live update ---
-const titleEl=document.querySelector("h1");
-// --- live controls ---
-Object.entries(controls).forEach(([key, el]) => {
-  el.oninput = () => {
-    applySetting(key, el.value);
-    if (key === "pads") {
-      reconcilePads(+el.value);
-    }
-    scheduleSave();
-  };
-});
-// --- autosave title ---
-titleEl.onblur=saveWorkspace;
-// --- visual presets ---
-const presetName=document.getElementById("presetName");
-const presetList=document.getElementById("presetList");
-const savePresetBtn=document.getElementById("savePreset");
-const loadPresetBtn=document.getElementById("loadPreset");
-const deletePresetBtn=document.getElementById("deletePreset");
-const PRESET_PREFIX2="npane-preset-";
-function collectVisualPreset2() {
-  return {
-    settings: Object.fromEntries(
-      Object.entries(SETTINGS_SCHEMA)
-        .filter(([, def]) => def.kind === "visual")
-        .map(([k]) => [k, controls[k].value])
-    )
-  };
-}
-function applyVisualPreset2(preset) {
-  if (!preset || !preset.settings) return;
-  // 1. Restore control values
-  for (const [k, v] of Object.entries(preset.settings)) {
-    if (controls[k]) controls[k].value = v;
-  }
-  // 2. Apply CSS variables only
-  for (const k in preset.settings) {
-    applySetting(k, preset.settings[k]);
-  }
-}
-async function refreshPresetList2() {
-  if (!await hasFolder()) {
-    presetList.innerHTML = "";
-    return;
-  }
-  presetList.innerHTML = "";
-  Object.keys(localStorage)
-    .filter(k => k.startsWith(PRESET_PREFIX2))
-    .forEach(k => {
-      const o = document.createElement("option");
-      o.value = k;
-      o.textContent = k.replace(PRESET_PREFIX2, "");
-      presetList.appendChild(o);
-    });
-}
-savePresetBtn.onclick = async () => {
-  if (!await hasFolder()) {
-    alert('Select presets folder first to use presets.');
-    return;
-  }
-  if (!presetName.value) return;
-  localStorage.setItem(
-    PRESET_PREFIX2 + presetName.value,
-    JSON.stringify(collectVisualPreset2())
-  );
-  const dirHandle = await getHandle('presetsFolder');
-  if (dirHandle) {
-    const presetData = collectVisualPreset2();
-    const blob = new Blob([JSON.stringify(presetData, null, 2)], { type: "application/json" });
-    const filename = presetName.value;
-    try {
-      let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
-      if (perm !== 'granted') {
-        perm = await dirHandle.requestPermission({ mode: 'readwrite' });
-        if (perm !== 'granted') throw new Error('Permission denied');
-      }
-      const fileHandle = await dirHandle.getFileHandle(filename + '.json', { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-    } catch (err) {
-      console.error('Error saving to folder:', err);
-      alert('Could not save to folder (permission denied or error). Preset saved locally only.');
-    }
-  }
-  await refreshPresetList2();
-};
-loadPresetBtn.onclick = async () => {
-  if (!await hasFolder()) {
-    alert('Select presets folder first to use presets.');
-    return;
-  }
-  if (!presetList.value) return;
-  const preset = JSON.parse(localStorage.getItem(presetList.value));
-  applyVisualPreset2(preset);
-  saveWorkspace();
-};
-deletePresetBtn.onclick = async () => {
-  if (!await hasFolder()) {
-    alert('Select presets folder first to use presets.');
-    return;
-  }
-  if (!presetList.value) return;
-  if (confirm("Delete preset?")) {
-    localStorage.removeItem(presetList.value);
-    const dirHandle = await getHandle('presetsFolder');
-    if (dirHandle) {
-      const name = presetList.value.replace(PRESET_PREFIX2, '');
-      try {
-        await dirHandle.removeEntry(name + '.json');
-      } catch (err) {
-        console.error('Error deleting file:', err);
-      }
-    }
-    await refreshPresetList2();
-  }
-};
-// --- EXPORT / IMPORT workspace + visual JSON ---
-const exportBtn = document.getElementById("exportWorkspace");
-const importBtn = document.getElementById("importWorkspace");
-const importFile = document.getElementById("importFile");
-const exportVisualBtn = document.getElementById("exportVisualPreset");
-const importVisualBtn = document.getElementById("importVisualPreset");
-const importVisualFile = document.getElementById("importVisualFile");
-// workspace export
-exportBtn.onclick = ()=>{
-  const data = collectWorkspace();
-  let filename = prompt("Enter filename for workspace export:", data.title);
-  if(!filename) filename = "npane_workspace";
-  const blob = new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename + ".json";
-  a.click();
-  URL.revokeObjectURL(url);
-};
-// workspace import
-importBtn.onclick=()=>importFile.click();
-importFile.onchange = e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const filenameTitle = file.name.replace(/\.json$/i, "");
-  const reader = new FileReader();
-  reader.onload = ev => {
-    try {
-      const data = JSON.parse(ev.target.result);
-      // override title with filename
-      data.title = filenameTitle;
-      applyWorkspace(data, { applyVisuals: false });
-      saveWorkspace();
-    } catch {
-      alert("Invalid JSON file");
-    }
-  };
-  reader.readAsText(file);
-};
-// visual export to folder (with fallback to download)
-exportVisualBtn.onclick = async () => {
-  const presetData = collectVisualPreset2();
-  let filename = presetName.value.trim();
-  if (!filename) filename = "visual_preset";
-  const blob = new Blob([JSON.stringify(presetData, null, 2)], { type: "application/json" });
-  const dirHandle = await getHandle('presetsFolder');
-  if (dirHandle) {
-    try {
-      let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
-      if (perm !== 'granted') {
-        perm = await dirHandle.requestPermission({ mode: 'readwrite' });
-        if (perm !== 'granted') throw new Error('Permission denied');
-      }
-      const fileHandle = await dirHandle.getFileHandle(filename + '.json', { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      await loadPresetsFromFolder(); // Refresh presets after save
-      alert('Visual preset saved to presets folder.');
-      return;
-    } catch (err) {
-      console.error('Error saving to folder:', err);
-      alert('Could not save to folder (permission denied or error). Falling back to download.');
-    }
-  } else {
-    alert('No presets folder selected. Falling back to download. Select a folder first for direct saves.');
-  }
-  // Fallback: Download
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename + ".json";
-  a.click();
-  URL.revokeObjectURL(url);
-};
-// visual import
-importVisualBtn.onclick=()=>importVisualFile.click();
-importVisualFile.onchange=e=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  const reader=new FileReader();
-  reader.onload=ev=>{
-    try{
-      const data=JSON.parse(ev.target.result);
-      applyVisualPreset2(data);
-      saveWorkspace();
-    }catch(err){alert("Invalid visual JSON file");}
-  };
-  reader.readAsText(file);
-};
-const resetAllBtn = document.getElementById("resetAll");
-function resetAll() {
-  if(!confirm("This will reset all pads, text, and visual/structure settings. Continue?")) return;
-  // --- Reset title ---
-  const titleEl = document.querySelector("h1");
-  titleEl.innerText = "N-Pane Draft Workspace";
-  // --- Reset controls to defaults ---
-  const defaultControls = {
-    font: "system-ui,sans-serif",
-    fontSize: 15,
-    textColor: "#2b2b2b",
-    bgColor: "#f2f3f5",
-    paperColor: "#fafafa",
-    borderColor: "#d6d6d6",
-    borderWidth: 1,
-    radius: 12,
-    padding: 16,
-    height: 260,
-    columns: 2,
-    pads: 6
-  };
-  for(const [k,v] of Object.entries(defaultControls)) {
-    if(controls[k]) controls[k].value = v;
-  }
-  // --- Apply CSS and rebuild pads ---
-  for(const k in defaultControls){
-    applySetting(k, defaultControls[k]);
-  }
-  // --- Reset grid ---
-  buildPads(defaultControls.pads);
-  // --- Save workspace ---
-  saveWorkspace();
-}
-resetAllBtn.onclick = resetAll;
-// --- New: Select and persist presets folder ---
-const selectFolderBtn = document.getElementById("selectFolder");
-selectFolderBtn.onclick = async () => {
-  if (!window.showDirectoryPicker) {
-    alert("Your browser doesn't support the File System Access API. Try Chrome or Edge.");
-    return;
-  }
-  try {
-    const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-    await saveHandle('presetsFolder', dirHandle);
-    alert('Presets folder selected and saved for automatic loading and saving.');
-    await loadPresetsFromFolder(); // Load immediately after selection
-  } catch (err) {
-    console.error(err);
-    alert('Error selecting folder: ' + err.message);
-  }
-};
-// --- New: Automatic load presets from persisted folder ---
-async function loadPresetsFromFolder() {
-  if (!window.showDirectoryPicker) return;
-  try {
-    const dirHandle = await getHandle('presetsFolder');
-    if (!dirHandle) return;
-    let perm = await dirHandle.queryPermission({ mode: 'read' });
-    if (perm !== 'granted') {
-      perm = await dirHandle.requestPermission({ mode: 'read' });
-      if (perm !== 'granted') return;
-    }
-    // Clear existing presets in localStorage
-    Object.keys(localStorage)
-      .filter(k => k.startsWith(PRESET_PREFIX2))
-      .forEach(k => localStorage.removeItem(k));
-    for await (const entry of dirHandle.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-        const fileHandle = await dirHandle.getFileHandle(entry.name);
-        const file = await fileHandle.getFile();
-        const text = await file.text();
-        try {
-          const data = JSON.parse(text);
-          const name = entry.name.replace(/\.json$/, '');
-          localStorage.setItem(PRESET_PREFIX2 + name, JSON.stringify(data));
-        } catch (e) {
-          console.error('Invalid JSON in file:', entry.name);
-        }
-      }
-    }
-    await refreshPresetList2();
-  } catch (err) {
-    console.error('Error loading presets automatically:', err);
-  }
-}
-loadWorkspace();
-loadPresetsFromFolder(); // Attempt automatic load on startup
-let isFocusMode = false;
-document.addEventListener('keydown', e => {
-  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
-    e.preventDefault();
-    toggleFocusMode();
-  }
-});
-function toggleFocusMode() {
-  isFocusMode = !isFocusMode;
-  if (isFocusMode) {
-    const activeTa = document.activeElement;
-    if (activeTa.tagName !== 'TEXTAREA') {
-      alert('Please focus on a pad first.');
-      isFocusMode = false;
-      return;
-    }
-    const currentPad = activeTa.closest('.pad');
-    titleEl.style.display = 'none';
-    controlsPanel.style.display = 'none';
-    toggleBtn.style.display = 'none';
-    [...grid.children].forEach(pad => {
-      if (pad !== currentPad) pad.style.display = 'none';
-    });
-    grid.style.marginTop = '0';
-    grid.style.gap = '0';
-    grid.style.gridTemplateColumns = '1fr';
-    currentPad.style.height = '100vh';
-    document.body.style.padding = '0';
-  } else {
-    titleEl.style.display = '';
-    controlsPanel.style.display = '';
-    toggleBtn.style.display = '';
-    [...grid.children].forEach(pad => pad.style.display = '');
-    grid.style.marginTop = '';
-    grid.style.gap = '';
-    applySetting('columns', controls.columns.value);
-    [...grid.children].forEach(pad => pad.style.height = '');
-    document.body.style.padding = '';
-  }
-}
-</script>
+
+<div class="app-shell">
+
+  <!-- ── HEADER ── -->
+  <header class="app-header">
+    <span
+      id="app-title"
+      class="app-title"
+      contenteditable="true"
+      spellcheck="false"
+      title="Click to rename workspace"
+    >N-Pane Draft Workspace</span>
+
+    <div class="header-actions">
+      <button id="controls-toggle" class="btn btn-icon btn-ghost" aria-expanded="true" title="Hide settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- ── CONTROLS ── -->
+  <div id="controls-wrapper" class="controls-wrapper">
+    <div class="controls-panel">
+
+      <!-- Structure -->
+      <div class="controls-section">
+        <div class="controls-section-title">Structure</div>
+
+        <div style="margin-bottom:10px;">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Quick layouts</div>
+          <div class="layout-chips">
+            <button class="layout-chip" data-layout="translate-2" title="2 pads: Translation | Original">
+              ⇄ 2-col
+            </button>
+            <button class="layout-chip" data-layout="translate-3" title="3 pads: Translation | Original | Notes">
+              ⇄ 3-col
+            </button>
+            <button class="layout-chip" data-layout="quad" title="2×2 grid">
+              ⊞ 2×2
+            </button>
+            <button class="layout-chip" data-layout="free" title="3×2 grid">
+              ⊞ 3×2
+            </button>
+          </div>
+        </div>
+
+        <div class="control-row">
+          <label for="ctrl-columns">Columns</label>
+          <input type="number" id="ctrl-columns" min="1" max="6" value="2">
+        </div>
+        <div class="control-row">
+          <label for="ctrl-pads">Pads</label>
+          <input type="number" id="ctrl-pads" min="1" max="20" value="2">
+        </div>
+        <div class="control-row">
+          <label for="ctrl-height">Pad height</label>
+          <input type="number" id="ctrl-height" min="80" max="2000" step="20" value="280">
+          <span style="font-size:11px;color:var(--text-muted)">px</span>
+        </div>
+      </div>
+
+      <!-- Visuals -->
+      <div class="controls-section">
+        <div class="controls-section-title">Visuals</div>
+
+        <div class="control-row">
+          <label for="ctrl-font">Font</label>
+          <select id="ctrl-font">
+            <option value="lora">Lora (serif)</option>
+            <option value="dm-sans">DM Sans</option>
+            <option value="jetbrains">Mono</option>
+            <option value="georgia">Georgia</option>
+            <option value="times">Times</option>
+            <option value="system">System</option>
+          </select>
+        </div>
+        <div class="control-row">
+          <label for="ctrl-fontSize">Font size</label>
+          <input type="number" id="ctrl-fontSize" min="10" max="32" value="15">
+          <span style="font-size:11px;color:var(--text-muted)">px</span>
+        </div>
+        <div class="control-row">
+          <label for="ctrl-textColor">Text</label>
+          <input type="color" id="ctrl-textColor" value="#2a2520">
+        </div>
+        <div class="control-row">
+          <label for="ctrl-paperColor">Pad bg</label>
+          <input type="color" id="ctrl-paperColor" value="#faf9f7">
+        </div>
+        <div class="control-row">
+          <label for="ctrl-bgColor">Page bg</label>
+          <input type="color" id="ctrl-bgColor" value="#f0ede8">
+        </div>
+        <div class="control-row">
+          <label for="ctrl-borderColor">Border</label>
+          <input type="color" id="ctrl-borderColor" value="#ddd9d2">
+          <input type="number" id="ctrl-borderWidth" min="0" max="8" value="1" style="width:46px;" title="Border width (px)">
+        </div>
+        <div class="control-row">
+          <label for="ctrl-padding">Padding</label>
+          <input type="number" id="ctrl-padding" min="0" max="60" value="18">
+        </div>
+        <div class="control-row">
+          <label for="ctrl-radius">Radius</label>
+          <input type="number" id="ctrl-radius" min="0" max="32" value="10">
+        </div>
+      </div>
+
+      <!-- Presets & I/O -->
+      <div class="controls-section">
+        <div class="controls-section-title">Presets</div>
+
+        <div class="control-row" style="margin-bottom:8px;">
+          <label for="preset-name">Name</label>
+          <input type="text" id="preset-name" placeholder="My preset…" style="flex:1;">
+        </div>
+
+        <div class="preset-row" style="margin-bottom:8px;">
+          <select id="preset-list" style="flex:1;min-width:0;"></select>
+        </div>
+
+        <div class="preset-row">
+          <button id="btn-save-preset" class="btn btn-primary">Save</button>
+          <button id="btn-load-preset" class="btn">Load</button>
+          <button id="btn-delete-preset" class="btn btn-danger">Delete</button>
+        </div>
+
+        <div class="section-divider"></div>
+        <div class="controls-section-title">Import / Export</div>
+
+        <div class="controls-actions">
+          <button id="btn-export-ws" class="btn" title="Export full workspace (text + settings)">↑ Workspace</button>
+          <button id="btn-import-ws" class="btn" title="Import workspace JSON">↓ Workspace</button>
+          <input type="file" id="file-import-ws" accept=".json" style="display:none;">
+
+          <button id="btn-export-visual" class="btn" title="Export visual preset JSON">↑ Visual</button>
+          <button id="btn-import-visual" class="btn" title="Import visual preset JSON">↓ Visual</button>
+          <input type="file" id="file-import-visual" accept=".json" style="display:none;">
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="controls-actions">
+          <button id="btn-select-folder" class="btn" title="Link a folder to auto-sync presets">
+            📁 Link folder
+          </button>
+          <button id="btn-reset-all" class="btn btn-danger">Reset all</button>
+        </div>
+      </div>
+
+    </div><!-- /.controls-panel -->
+  </div><!-- /.controls-wrapper -->
+
+  <!-- ── PAD GRID ── -->
+  <div class="grid-wrapper">
+    <div id="pad-grid" class="pad-grid"></div>
+  </div>
+
+  <!-- ── STATUS BAR ── -->
+  <div class="status-bar">
+    <span id="status-saved" style="opacity:0.6;"></span>
+    <span id="status-words"></span>
+    <span style="margin-left:auto;opacity:0.5;" title="Ctrl+Shift+F = focus mode, Esc = exit">Ctrl+Shift+F — focus mode</span>
+  </div>
+
+</div><!-- /.app-shell -->
+
+<!-- Toast container -->
+<div id="toast-container" class="toast-container"></div>
+
+<script type="module" src="app.js"></script>
 </body>
 </html>
