@@ -1,19 +1,19 @@
 /**
  * app.js — N-Pane Draft Workspace
- * Main application logic
  */
 
 import {
-  saveHandle, getHandle, hasFolderHandle,
+  saveHandle, getHandle,
   saveWorkspaceLS, loadWorkspaceLS,
   listLocalPresets, saveLocalPreset, loadLocalPreset, deleteLocalPreset,
   savePresetToFolder, deletePresetFromFolder, loadPresetsFromFolder,
-  PRESET_PREFIX,
+  listProjects, saveProject, loadProject, deleteProject,
 } from './storage.js';
 
 import {
-  DEFAULTS, SCHEMA, FONT_OPTIONS,
-  applySetting, applyAllSettings, collectVisualSettings, collectAllSettings,
+  DEFAULTS, FONT_OPTIONS,
+  applySetting, applyAllSettings, refreshUIPalette,
+  collectVisualSettings, collectAllSettings,
 } from './settings.js';
 
 // ── DOM refs ───────────────────────────────────────
@@ -25,6 +25,19 @@ const padGrid        = document.getElementById('pad-grid');
 const statusSaved    = document.getElementById('status-saved');
 const statusWords    = document.getElementById('status-words');
 const toastContainer = document.getElementById('toast-container');
+const sidebar        = document.getElementById('sidebar');
+const sidebarToggle  = document.getElementById('sidebar-toggle');
+const projectListEl  = document.getElementById('project-list');
+const btnNewProject  = document.getElementById('btn-new-project');
+const btnSaveProject = document.getElementById('btn-save-project');
+const findBar        = document.getElementById('find-bar');
+const findInput      = document.getElementById('find-input');
+const replaceInput   = document.getElementById('replace-input');
+const btnReplaceOne  = document.getElementById('btn-replace-one');
+const btnReplaceAll  = document.getElementById('btn-replace-all');
+const findCount      = document.getElementById('find-count');
+const btnFindClose   = document.getElementById('btn-find-close');
+const btnFind        = document.getElementById('btn-find');
 
 const ctrl = {
   font:        document.getElementById('ctrl-font'),
@@ -41,32 +54,28 @@ const ctrl = {
   pads:        document.getElementById('ctrl-pads'),
 };
 
-// Preset controls
 const presetNameInput = document.getElementById('preset-name');
 const presetList      = document.getElementById('preset-list');
 const btnSavePreset   = document.getElementById('btn-save-preset');
 const btnLoadPreset   = document.getElementById('btn-load-preset');
 const btnDeletePreset = document.getElementById('btn-delete-preset');
-
-// Import/export
-const btnExportWS       = document.getElementById('btn-export-ws');
-const btnImportWS       = document.getElementById('btn-import-ws');
-const fileImportWS      = document.getElementById('file-import-ws');
-const btnExportVisual   = document.getElementById('btn-export-visual');
-const btnImportVisual   = document.getElementById('btn-import-visual');
-const fileImportVisual  = document.getElementById('file-import-visual');
-const btnSelectFolder   = document.getElementById('btn-select-folder');
-const btnResetAll       = document.getElementById('btn-reset-all');
-
-// Layout chips
-const layoutChips = document.querySelectorAll('[data-layout]');
+const btnExportWS     = document.getElementById('btn-export-ws');
+const btnImportWS     = document.getElementById('btn-import-ws');
+const fileImportWS    = document.getElementById('file-import-ws');
+const btnExportVisual = document.getElementById('btn-export-visual');
+const btnImportVisual = document.getElementById('btn-import-visual');
+const fileImportVisual= document.getElementById('file-import-visual');
+const btnSelectFolder = document.getElementById('btn-select-folder');
+const btnResetAll     = document.getElementById('btn-reset-all');
+const layoutChips     = document.querySelectorAll('[data-layout]');
 
 // ── State ──────────────────────────────────────────
 
-let focusMode     = false;
-let focusPad      = null;
-let saveTimer     = null;
-let lastSaveTime  = null;
+let focusMode       = false;
+let focusPad        = null;
+let saveTimer       = null;
+let syncScrolling   = false;   // prevent re-entrant scroll sync
+let currentProjectId = null;   // null = unsaved / new workspace
 
 // ── Toast ──────────────────────────────────────────
 
@@ -75,13 +84,8 @@ function toast(msg, type = '') {
   el.className = 'toast' + (type ? ' ' + type : '');
   el.textContent = msg;
   toastContainer.appendChild(el);
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => el.classList.add('show'));
-  });
-  setTimeout(() => {
-    el.classList.remove('show');
-    setTimeout(() => el.remove(), 250);
-  }, 2500);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 250); }, 2500);
 }
 
 // ── Save ───────────────────────────────────────────
@@ -92,11 +96,15 @@ function scheduleSave() {
 }
 
 function doSave() {
-  saveWorkspaceLS(collectWorkspace());
-  lastSaveTime = new Date();
-  if (statusSaved) {
-    statusSaved.textContent = 'Saved ' + lastSaveTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const ws = collectWorkspace();
+  saveWorkspaceLS(ws);
+  // Auto-update project if one is open
+  if (currentProjectId) {
+    saveProject({ ...ws, id: currentProjectId });
+    renderProjectList();
   }
+  const t = new Date();
+  if (statusSaved) statusSaved.textContent = 'Saved ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   updateWordCount();
 }
 
@@ -104,7 +112,7 @@ function doSave() {
 
 function updateWordCount() {
   const total = [...padGrid.querySelectorAll('textarea')]
-    .reduce((acc, ta) => acc + (ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0), 0);
+    .reduce((n, ta) => n + (ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0), 0);
   if (statusWords) statusWords.textContent = total.toLocaleString() + ' words';
 }
 
@@ -115,7 +123,7 @@ function createPad(index, content = '', labelText = '') {
   wrap.className = 'pad';
   wrap.dataset.index = index;
 
-  const header  = document.createElement('div');
+  const header = document.createElement('div');
   header.className = 'pad-header';
 
   const labelSpan = document.createElement('span');
@@ -133,14 +141,26 @@ function createPad(index, content = '', labelText = '') {
   const actions = document.createElement('div');
   actions.className = 'pad-actions';
 
-  // Focus mode button
+  // Sync scroll toggle
+  const syncBtn = document.createElement('button');
+  syncBtn.className = 'pad-btn';
+  syncBtn.title = 'Toggle sync scroll with other pads';
+  syncBtn.innerHTML = '⇅';
+  syncBtn.addEventListener('click', () => {
+    syncBtn.classList.toggle('active');
+    wrap.dataset.syncScroll = syncBtn.classList.contains('active') ? '1' : '';
+    const any = [...padGrid.querySelectorAll('.pad')].some(p => p.dataset.syncScroll);
+    wrap.classList.toggle('sync-scroll-active', !!wrap.dataset.syncScroll);
+  });
+
+  // Focus mode
   const focusBtn = document.createElement('button');
   focusBtn.className = 'pad-btn';
   focusBtn.title = 'Focus mode (Ctrl+Shift+F)';
   focusBtn.innerHTML = '⛶';
   focusBtn.addEventListener('click', () => enterFocusMode(wrap));
 
-  // Clear button
+  // Clear
   const clearBtn = document.createElement('button');
   clearBtn.className = 'pad-btn';
   clearBtn.title = 'Clear pad';
@@ -154,15 +174,29 @@ function createPad(index, content = '', labelText = '') {
     }
   });
 
-  actions.append(focusBtn, clearBtn);
+  actions.append(syncBtn, focusBtn, clearBtn);
   header.append(labelSpan, wordCount, actions);
 
   const ta = document.createElement('textarea');
-  ta.value   = content;
+  ta.value = content;
   ta.spellcheck = true;
+
   ta.addEventListener('input', () => {
     scheduleSave();
     updatePadWordCount(wrap);
+  });
+
+  // Sync scroll
+  ta.addEventListener('scroll', () => {
+    if (syncScrolling) return;
+    if (!wrap.dataset.syncScroll) return;
+    const ratio = ta.scrollTop / (ta.scrollHeight - ta.clientHeight || 1);
+    syncScrolling = true;
+    [...padGrid.querySelectorAll('.pad[data-sync-scroll="1"] textarea')].forEach(other => {
+      if (other === ta) return;
+      other.scrollTop = ratio * (other.scrollHeight - other.clientHeight);
+    });
+    syncScrolling = false;
   });
 
   wrap.append(header, ta);
@@ -181,7 +215,6 @@ function buildPads(count, contents = [], labels = []) {
   for (let i = 0; i < count; i++) {
     const pad = createPad(i, contents[i] || '', labels[i] || '');
     padGrid.appendChild(pad);
-    // stagger entrance
     setTimeout(() => pad.classList.add('show'), i * 30);
   }
   updateWordCount();
@@ -193,8 +226,8 @@ function reconcilePads(targetCount, existingContents, existingLabels) {
 
   if (targetCount < count) {
     const toRemove = currentPads.slice(targetCount);
-    const hasText  = toRemove.some(p => p.querySelector('textarea').value.trim());
-    if (hasText && !confirm('Reducing pads will remove text. Continue?')) {
+    if (toRemove.some(p => p.querySelector('textarea').value.trim()) &&
+        !confirm('Reducing pads will remove text. Continue?')) {
       ctrl.pads.value = count;
       return;
     }
@@ -212,20 +245,19 @@ function reconcilePads(targetCount, existingContents, existingLabels) {
 // ── Workspace collect / apply ──────────────────────
 
 function collectWorkspace() {
-  const pads   = [...padGrid.querySelectorAll('.pad')];
+  const pads = [...padGrid.querySelectorAll('.pad')];
   return {
     title:    titleEl.textContent.trim(),
     settings: collectAllSettings(ctrl),
     pads:     pads.map(p => p.querySelector('textarea').value),
-    labels:   pads.map(p => {
-      const l = p.querySelector('.pad-label-text');
-      return l ? l.textContent.trim() : '';
-    }),
+    labels:   pads.map(p => (p.querySelector('.pad-label-text')?.textContent.trim() || '')),
+    id:       currentProjectId || undefined,
   };
 }
 
 function applyWorkspace(ws, { applyVisuals = true } = {}) {
   titleEl.textContent = ws.title || 'N-Pane Draft Workspace';
+  currentProjectId = ws.id || null;
 
   const settings = { ...DEFAULTS, ...(ws.settings || {}) };
   for (const [k, v] of Object.entries(settings)) {
@@ -236,9 +268,7 @@ function applyWorkspace(ws, { applyVisuals = true } = {}) {
   buildPads(Number(ctrl.pads.value), ws.pads || [], ws.labels || []);
   applySetting('columns', Number(ctrl.columns.value));
 
-  if (applyVisuals) {
-    applyAllSettings(settings);
-  }
+  if (applyVisuals) applyAllSettings(settings);
 
   updateLayoutChips();
 }
@@ -256,32 +286,24 @@ function updateLayoutChips() {
   const cols = Number(ctrl.columns.value);
   const pads = Number(ctrl.pads.value);
   layoutChips.forEach(chip => {
-    const key    = chip.dataset.layout;
-    const layout = LAYOUTS[key];
-    if (!layout) return;
-    chip.classList.toggle('active', layout.columns === cols && layout.pads === pads);
+    const layout = LAYOUTS[chip.dataset.layout];
+    chip.classList.toggle('active', !!layout && layout.columns === cols && layout.pads === pads);
   });
 }
 
 function applyLayout(key) {
   const layout = LAYOUTS[key];
   if (!layout) return;
-
-  const currentPads    = [...padGrid.children];
-  const currentContent = currentPads.map(p => p.querySelector('textarea').value);
-
+  const currentContent = [...padGrid.children].map(p => p.querySelector('textarea').value);
   ctrl.columns.value = layout.columns;
   ctrl.pads.value    = layout.pads;
   applySetting('columns', layout.columns);
-
   buildPads(layout.pads, currentContent, layout.labels);
   updateLayoutChips();
   scheduleSave();
 }
 
-layoutChips.forEach(chip => {
-  chip.addEventListener('click', () => applyLayout(chip.dataset.layout));
-});
+layoutChips.forEach(chip => chip.addEventListener('click', () => applyLayout(chip.dataset.layout)));
 
 // ── Visual preset apply ────────────────────────────
 
@@ -294,7 +316,7 @@ function applyVisualPreset(preset) {
   scheduleSave();
 }
 
-// ── Presets list ───────────────────────────────────
+// ── Preset list ────────────────────────────────────
 
 function refreshPresetList() {
   const names = listLocalPresets();
@@ -303,18 +325,126 @@ function refreshPresetList() {
     : '<option value="" disabled>No presets saved</option>';
 }
 
-// ── Controls panel toggle ──────────────────────────
+// ── Project sidebar ────────────────────────────────
 
-function setControlsVisible(visible) {
-  controlsWrap.classList.toggle('collapsed', !visible);
-  toggleBtn.setAttribute('aria-expanded', visible);
-  toggleBtn.title = visible ? 'Hide settings' : 'Show settings';
-  localStorage.setItem('npane-controls-hidden', visible ? '' : '1');
+function formatDate(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+function renderProjectList() {
+  const projects = listProjects();
+  projectListEl.innerHTML = '';
+
+  if (!projects.length) {
+    projectListEl.innerHTML = '<div style="font-size:11px;color:var(--text-label);padding:10px 8px;">No saved projects yet.<br>Hit ↑ to save the current workspace.</div>';
+    return;
+  }
+
+  projects.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'project-item' + (p.id === currentProjectId ? ' active' : '');
+    item.title = p.title;
+
+    const icon = document.createElement('span');
+    icon.className = 'project-icon';
+    icon.textContent = '◻';
+
+    const info = document.createElement('div');
+    info.className = 'project-info';
+
+    const name = document.createElement('span');
+    name.className = 'project-name';
+    name.textContent = p.title;
+
+    const date = document.createElement('span');
+    date.className = 'project-date';
+    date.textContent = formatDate(p.savedAt);
+
+    const del = document.createElement('button');
+    del.className = 'project-delete';
+    del.title = 'Delete project';
+    del.textContent = '✕';
+    del.addEventListener('click', e => {
+      e.stopPropagation();
+      if (confirm(`Delete "${p.title}"?`)) {
+        deleteProject(p.id);
+        if (currentProjectId === p.id) currentProjectId = null;
+        renderProjectList();
+        toast(`"${p.title}" deleted`);
+      }
+    });
+
+    info.append(name, date);
+    item.append(icon, info, del);
+    item.addEventListener('click', () => openProject(p.id));
+    projectListEl.appendChild(item);
+  });
+}
+
+function openProject(id) {
+  const data = loadProject(id);
+  if (!data) { toast('Project not found', 'error'); return; }
+  // Save current state before switching
+  if (currentProjectId) doSave();
+  applyWorkspace(data, { applyVisuals: true });
+  currentProjectId = id;
+  saveWorkspaceLS(collectWorkspace());
+  renderProjectList();
+  toast(`Opened "${data.title}"`);
+}
+
+btnSaveProject.addEventListener('click', () => {
+  const ws = collectWorkspace();
+  const id = saveProject({ ...ws, id: currentProjectId });
+  currentProjectId = id;
+  renderProjectList();
+  toast(`Saved "${ws.title}"`);
+});
+
+btnNewProject.addEventListener('click', () => {
+  // Save current first
+  if (currentProjectId) doSave();
+  // Start fresh
+  currentProjectId = null;
+  titleEl.textContent = 'New Project';
+  applyAllSettings(DEFAULTS);
+  for (const [k, v] of Object.entries(DEFAULTS)) {
+    if (ctrl[k]) ctrl[k].value = v;
+  }
+  buildPads(2, [], ['Translation', 'Original']);
+  applySetting('columns', 2);
+  ctrl.columns.value = 2;
+  updateLayoutChips();
+  saveWorkspaceLS(collectWorkspace());
+  renderProjectList();
+  toast('New project started');
+});
+
+// ── Sidebar toggle ─────────────────────────────────
+
+function setSidebarOpen(open) {
+  sidebar.classList.toggle('collapsed', !open);
+  localStorage.setItem('npane-sidebar-hidden', open ? '' : '1');
+}
+
+sidebarToggle.addEventListener('click', () => {
+  setSidebarOpen(sidebar.classList.contains('collapsed'));
+});
+
+// ── Controls panel toggle ──────────────────────────
+
 toggleBtn.addEventListener('click', () => {
-  const isCollapsed = controlsWrap.classList.contains('collapsed');
-  setControlsVisible(isCollapsed);
+  const collapsed = controlsWrap.classList.contains('collapsed');
+  controlsWrap.classList.toggle('collapsed', !collapsed);
+  toggleBtn.setAttribute('aria-expanded', collapsed);
+  localStorage.setItem('npane-controls-hidden', collapsed ? '' : '1');
 });
 
 // ── Focus mode ─────────────────────────────────────
@@ -331,25 +461,119 @@ function exitFocusMode() {
   if (!focusMode) return;
   focusMode = false;
   document.body.classList.remove('focus-mode');
-  if (focusPad) {
-    focusPad.classList.remove('focus-active');
-    focusPad = null;
-  }
+  focusPad?.classList.remove('focus-active');
+  focusPad = null;
 }
 
-document.addEventListener('keydown', e => {
-  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
-    e.preventDefault();
-    if (focusMode) {
-      exitFocusMode();
-    } else {
-      const active = document.activeElement;
-      const pad    = active?.closest?.('.pad');
-      if (pad) enterFocusMode(pad);
+// ── Find & Replace ─────────────────────────────────
+
+function openFindBar() {
+  findBar.classList.remove('hidden');
+  findInput.focus();
+  findInput.select();
+  updateFindCount();
+}
+
+function closeFindBar() {
+  findBar.classList.add('hidden');
+}
+
+function getAllTextareas() {
+  return [...padGrid.querySelectorAll('textarea')];
+}
+
+function updateFindCount() {
+  const term = findInput.value;
+  if (!term) { findCount.textContent = ''; return; }
+  let total = 0;
+  getAllTextareas().forEach(ta => {
+    const matches = ta.value.split(term).length - 1;
+    total += matches;
+  });
+  findCount.textContent = total ? `${total} match${total === 1 ? '' : 'es'}` : 'no matches';
+}
+
+btnReplaceOne.addEventListener('click', () => {
+  const term = findInput.value;
+  const rep  = replaceInput.value;
+  if (!term) return;
+  for (const ta of getAllTextareas()) {
+    const idx = ta.value.indexOf(term);
+    if (idx >= 0) {
+      ta.value = ta.value.slice(0, idx) + rep + ta.value.slice(idx + term.length);
+      scheduleSave();
+      updateFindCount();
+      return;
     }
   }
-  if (e.key === 'Escape' && focusMode) {
-    exitFocusMode();
+  toast('No match found');
+});
+
+btnReplaceAll.addEventListener('click', () => {
+  const term = findInput.value;
+  const rep  = replaceInput.value;
+  if (!term) return;
+  let count = 0;
+  getAllTextareas().forEach(ta => {
+    const parts = ta.value.split(term);
+    if (parts.length > 1) {
+      count += parts.length - 1;
+      ta.value = parts.join(rep);
+    }
+  });
+  if (count) {
+    scheduleSave();
+    toast(`Replaced ${count} occurrence${count === 1 ? '' : 's'}`);
+  } else {
+    toast('No matches found');
+  }
+  updateFindCount();
+});
+
+findInput.addEventListener('input', updateFindCount);
+btnFindClose.addEventListener('click', closeFindBar);
+btnFind.addEventListener('click', () => {
+  findBar.classList.contains('hidden') ? openFindBar() : closeFindBar();
+});
+
+// ── Keyboard shortcuts ─────────────────────────────
+
+document.addEventListener('keydown', e => {
+  // Focus mode toggle
+  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    if (focusMode) exitFocusMode();
+    else {
+      const pad = document.activeElement?.closest?.('.pad');
+      if (pad) enterFocusMode(pad);
+    }
+    return;
+  }
+
+  // Escape
+  if (e.key === 'Escape') {
+    if (focusMode) { exitFocusMode(); return; }
+    if (!findBar.classList.contains('hidden')) { closeFindBar(); return; }
+  }
+
+  // Find & replace
+  if (e.ctrlKey && e.key.toLowerCase() === 'h') {
+    e.preventDefault();
+    findBar.classList.contains('hidden') ? openFindBar() : closeFindBar();
+    return;
+  }
+
+  // Jump between pads: Ctrl+Arrow
+  if (e.ctrlKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    const pads = [...padGrid.querySelectorAll('.pad')];
+    const current = document.activeElement?.closest?.('.pad');
+    if (!current) return;
+    const idx = pads.indexOf(current);
+    const next = e.key === 'ArrowRight'
+      ? pads[idx + 1] || pads[0]
+      : pads[idx - 1] || pads[pads.length - 1];
+    next?.querySelector('textarea')?.focus();
+    e.preventDefault();
   }
 });
 
@@ -359,6 +583,12 @@ Object.entries(ctrl).forEach(([key, el]) => {
   if (!el) return;
   el.addEventListener('input', () => {
     applySetting(key, el.value);
+
+    // Re-derive full UI palette whenever a color or bg changes
+    if (['bgColor', 'paperColor', 'textColor', 'borderColor'].includes(key)) {
+      refreshUIPalette(ctrl.bgColor.value, ctrl.paperColor.value, ctrl.textColor.value, ctrl.borderColor.value);
+    }
+
     if (key === 'pads') {
       const ws = collectWorkspace();
       reconcilePads(Number(el.value), ws.pads, ws.labels);
@@ -370,18 +600,17 @@ Object.entries(ctrl).forEach(([key, el]) => {
 
 titleEl.addEventListener('blur', scheduleSave);
 
-// ── Save / Load preset buttons ─────────────────────
+// ── Save/Load preset ───────────────────────────────
 
 btnSavePreset.addEventListener('click', async () => {
   const name = presetNameInput.value.trim();
   if (!name) { toast('Enter a preset name first', 'error'); return; }
   const data = { settings: collectVisualSettings(ctrl) };
   saveLocalPreset(name, data);
-
   const dirHandle = await getHandle('presetsFolder');
   if (dirHandle) {
     try { await savePresetToFolder(dirHandle, name, data); }
-    catch (err) { toast('Saved locally (folder write failed)', 'error'); }
+    catch { toast('Saved locally (folder write failed)', 'error'); }
   }
   refreshPresetList();
   toast(`Preset "${name}" saved`);
@@ -400,12 +629,8 @@ btnDeletePreset.addEventListener('click', async () => {
   const name = presetList.value;
   if (!name || !confirm(`Delete preset "${name}"?`)) return;
   deleteLocalPreset(name);
-
   const dirHandle = await getHandle('presetsFolder');
-  if (dirHandle) {
-    try { await deletePresetFromFolder(dirHandle, name); }
-    catch { /* file may not exist */ }
-  }
+  if (dirHandle) { try { await deletePresetFromFolder(dirHandle, name); } catch {} }
   refreshPresetList();
   toast(`Preset "${name}" deleted`);
 });
@@ -413,7 +638,7 @@ btnDeletePreset.addEventListener('click', async () => {
 // ── Export / Import workspace ──────────────────────
 
 btnExportWS.addEventListener('click', () => {
-  const data     = collectWorkspace();
+  const data = collectWorkspace();
   const filename = prompt('Filename:', data.title || 'npane-workspace') || 'npane-workspace';
   download(filename + '.json', JSON.stringify(data, null, 2));
 });
@@ -434,8 +659,8 @@ fileImportWS.addEventListener('change', e => {
 // ── Export / Import visual preset ─────────────────
 
 btnExportVisual.addEventListener('click', async () => {
-  const data     = { settings: collectVisualSettings(ctrl) };
-  const name     = presetNameInput.value.trim() || 'visual-preset';
+  const data = { settings: collectVisualSettings(ctrl) };
+  const name = presetNameInput.value.trim() || 'visual-preset';
   const dirHandle = await getHandle('presetsFolder');
   if (dirHandle) {
     try {
@@ -444,7 +669,7 @@ btnExportVisual.addEventListener('click', async () => {
       refreshPresetList();
       toast(`Visual preset "${name}" saved to folder`);
       return;
-    } catch { /* fall through to download */ }
+    } catch {}
   }
   download(name + '.json', JSON.stringify(data, null, 2));
   toast('Visual preset downloaded');
@@ -455,19 +680,13 @@ fileImportVisual.addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
-  readJSON(file, data => {
-    applyVisualPreset(data);
-    toast('Visual preset applied');
-  });
+  readJSON(file, data => { applyVisualPreset(data); toast('Visual preset applied'); });
 });
 
 // ── Select folder ──────────────────────────────────
 
 btnSelectFolder.addEventListener('click', async () => {
-  if (!window.showDirectoryPicker) {
-    toast('File System API not supported (use Chrome/Edge)', 'error');
-    return;
-  }
+  if (!window.showDirectoryPicker) { toast('File System API not supported (Chrome/Edge)', 'error'); return; }
   try {
     const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
     await saveHandle('presetsFolder', dirHandle);
@@ -484,9 +703,8 @@ btnSelectFolder.addEventListener('click', async () => {
 btnResetAll.addEventListener('click', () => {
   if (!confirm('Reset everything to defaults?')) return;
   titleEl.textContent = 'N-Pane Draft Workspace';
-  for (const [k, v] of Object.entries(DEFAULTS)) {
-    if (ctrl[k]) ctrl[k].value = v;
-  }
+  currentProjectId = null;
+  for (const [k, v] of Object.entries(DEFAULTS)) { if (ctrl[k]) ctrl[k].value = v; }
   applyAllSettings(DEFAULTS);
   buildPads(DEFAULTS.pads, [], []);
   updateLayoutChips();
@@ -497,7 +715,7 @@ btnResetAll.addEventListener('click', () => {
 // ── Utilities ──────────────────────────────────────
 
 function download(filename, text) {
-  const a   = Object.assign(document.createElement('a'), {
+  const a = Object.assign(document.createElement('a'), {
     href: URL.createObjectURL(new Blob([text], { type: 'application/json' })),
     download: filename,
   });
@@ -507,28 +725,29 @@ function download(filename, text) {
 
 function readJSON(file, cb) {
   const reader = new FileReader();
-  reader.onload = ev => {
-    try { cb(JSON.parse(ev.target.result)); }
-    catch { toast('Invalid JSON file', 'error'); }
-  };
+  reader.onload = ev => { try { cb(JSON.parse(ev.target.result)); } catch { toast('Invalid JSON', 'error'); } };
   reader.readAsText(file);
 }
 
 // ── Boot ───────────────────────────────────────────
 
 async function init() {
-  // Restore controls visibility preference
+  // Restore sidebar visibility
+  if (localStorage.getItem('npane-sidebar-hidden') === '1') {
+    sidebar.classList.add('collapsed');
+  }
+
+  // Restore controls visibility
   if (localStorage.getItem('npane-controls-hidden') === '1') {
     controlsWrap.classList.add('collapsed');
     toggleBtn.setAttribute('aria-expanded', 'false');
   }
 
-  // Load workspace from localStorage
+  // Load workspace
   const saved = loadWorkspaceLS();
   if (saved) {
     applyWorkspace(saved, { applyVisuals: true });
   } else {
-    // First run — apply defaults and create a nice translation default
     applyAllSettings(DEFAULTS);
     ctrl.columns.value = 2;
     ctrl.pads.value    = 2;
@@ -537,17 +756,17 @@ async function init() {
     updateLayoutChips();
   }
 
-  // Refresh preset list (localStorage)
   refreshPresetList();
+  renderProjectList();
 
-  // Try to auto-load from persisted folder
+  // Auto-load presets from persisted folder
   try {
     const dirHandle = await getHandle('presetsFolder');
     if (dirHandle) {
       await loadPresetsFromFolder(dirHandle);
       refreshPresetList();
     }
-  } catch { /* silent — folder may have lost permission */ }
+  } catch {}
 }
 
 init();
