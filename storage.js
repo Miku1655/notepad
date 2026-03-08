@@ -1,11 +1,13 @@
 /**
- * storage.js — IndexedDB handle persistence + localStorage workspace/preset helpers
+ * storage.js — IndexedDB handle persistence + localStorage workspace/preset/project helpers
  */
 
 const DB_NAME    = 'npane-db';
 const STORE_NAME = 'handles';
 const WS_KEY     = 'npane-workspace';
-export const PRESET_PREFIX = 'npane-preset-';
+export const PRESET_PREFIX  = 'npane-preset-';
+export const PROJECT_PREFIX = 'npane-project-';
+export const PROJECT_INDEX  = 'npane-project-index';
 
 // ── IndexedDB ──────────────────────────────────────
 
@@ -40,11 +42,7 @@ export async function getHandle(name) {
   });
 }
 
-export async function hasFolderHandle() {
-  return !!(await getHandle('presetsFolder'));
-}
-
-// ── Workspace ─────────────────────────────────────
+// ── Workspace (current session) ───────────────────
 
 export function saveWorkspaceLS(data) {
   localStorage.setItem(WS_KEY, JSON.stringify(data));
@@ -55,7 +53,7 @@ export function loadWorkspaceLS() {
   return raw ? JSON.parse(raw) : null;
 }
 
-// ── Presets (localStorage) ─────────────────────────
+// ── Presets (visual) ──────────────────────────────
 
 export function listLocalPresets() {
   return Object.keys(localStorage)
@@ -74,6 +72,62 @@ export function loadLocalPreset(name) {
 
 export function deleteLocalPreset(name) {
   localStorage.removeItem(PRESET_PREFIX + name);
+}
+
+// ── Project history ───────────────────────────────
+// Each project: { id, title, savedAt, ...workspace }
+// Index: array of { id, title, savedAt }
+
+function getProjectIndex() {
+  const raw = localStorage.getItem(PROJECT_INDEX);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function setProjectIndex(index) {
+  localStorage.setItem(PROJECT_INDEX, JSON.stringify(index));
+}
+
+export function listProjects() {
+  return getProjectIndex().sort((a, b) => b.savedAt - a.savedAt);
+}
+
+export function saveProject(workspaceData) {
+  const index = getProjectIndex();
+  const id    = workspaceData.id || ('proj-' + Date.now());
+  const entry = { id, title: workspaceData.title || 'Untitled', savedAt: Date.now() };
+
+  const existing = index.findIndex(p => p.id === id);
+  if (existing >= 0) index[existing] = entry;
+  else index.push(entry);
+  setProjectIndex(index);
+
+  localStorage.setItem(PROJECT_PREFIX + id, JSON.stringify({ ...workspaceData, id, savedAt: Date.now() }));
+  return id;
+}
+
+export function loadProject(id) {
+  const raw = localStorage.getItem(PROJECT_PREFIX + id);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export function deleteProject(id) {
+  const index = getProjectIndex().filter(p => p.id !== id);
+  setProjectIndex(index);
+  localStorage.removeItem(PROJECT_PREFIX + id);
+}
+
+export function renameProject(id, newTitle) {
+  const index = getProjectIndex();
+  const entry = index.find(p => p.id === id);
+  if (entry) {
+    entry.title = newTitle;
+    setProjectIndex(index);
+    const data = loadProject(id);
+    if (data) {
+      data.title = newTitle;
+      localStorage.setItem(PROJECT_PREFIX + id, JSON.stringify(data));
+    }
+  }
 }
 
 // ── Folder-based presets ───────────────────────────
@@ -97,7 +151,6 @@ export async function loadPresetsFromFolder(dirHandle) {
   if (perm !== 'granted') perm = await dirHandle.requestPermission({ mode: 'read' });
   if (perm !== 'granted') throw new Error('Read permission denied');
 
-  // Clear stale
   listLocalPresets().forEach(n => deleteLocalPreset(n));
 
   const loaded = [];
