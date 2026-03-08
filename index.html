@@ -8,20 +8,33 @@
 </head>
 <body>
 
+<!-- ── SIDEBAR ── -->
+<aside id="sidebar" class="sidebar">
+  <div class="sidebar-header">
+    <span class="sidebar-title">Projects</span>
+    <button id="btn-save-project" class="btn btn-ghost btn-icon" title="Save current as project" style="width:24px;height:24px;font-size:14px;">↑</button>
+  </div>
+  <div class="sidebar-body" id="project-list"></div>
+  <div class="sidebar-footer">
+    <button id="btn-new-project" class="sidebar-new-btn">＋ New project</button>
+  </div>
+</aside>
+
+<!-- ── MAIN ── -->
 <div class="app-shell">
 
-  <!-- ── HEADER ── -->
   <header class="app-header">
+    <button id="sidebar-toggle" class="btn btn-ghost btn-icon sidebar-toggle" title="Toggle projects sidebar">❤︎</button>
     <span
       id="app-title"
       class="app-title"
       contenteditable="true"
       spellcheck="false"
-      title="Click to rename workspace"
+      title="Click to rename"
     >N-Pane Draft Workspace</span>
-
     <div class="header-actions">
-      <button id="controls-toggle" class="btn btn-icon btn-ghost" aria-expanded="true" title="Hide settings">⚙</button>
+      <button id="btn-find" class="btn btn-ghost btn-icon" title="Find & Replace (Ctrl+H)">⌕</button>
+      <button id="controls-toggle" class="btn btn-ghost btn-icon" aria-expanded="true" title="Toggle settings">⚙</button>
     </div>
   </header>
 
@@ -32,25 +45,15 @@
       <!-- Structure -->
       <div class="controls-section">
         <div class="controls-section-title">Structure</div>
-
         <div style="margin-bottom:10px;">
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Quick layouts</div>
           <div class="layout-chips">
-            <button class="layout-chip" data-layout="translate-2" title="2 pads: Translation | Original">
-              ⇄ 2-col
-            </button>
-            <button class="layout-chip" data-layout="translate-3" title="3 pads: Translation | Original | Notes">
-              ⇄ 3-col
-            </button>
-            <button class="layout-chip" data-layout="quad" title="2×2 grid">
-              ⊞ 2×2
-            </button>
-            <button class="layout-chip" data-layout="free" title="3×2 grid">
-              ⊞ 3×2
-            </button>
+            <button class="layout-chip" data-layout="translate-2" title="2 pads: Translation | Original">⇄ 2-col</button>
+            <button class="layout-chip" data-layout="translate-3" title="3 pads: Translation | Original | Notes">⇄ 3-col</button>
+            <button class="layout-chip" data-layout="quad"        title="2×2 grid">⊞ 2×2</button>
+            <button class="layout-chip" data-layout="free"        title="3×2 grid">⊞ 3×2</button>
           </div>
         </div>
-
         <div class="control-row">
           <label for="ctrl-columns">Columns</label>
           <input type="number" id="ctrl-columns" min="1" max="6" value="2">
@@ -69,7 +72,6 @@
       <!-- Visuals -->
       <div class="controls-section">
         <div class="controls-section-title">Visuals</div>
-
         <div class="control-row">
           <label for="ctrl-font">Font</label>
           <select id="ctrl-font">
@@ -115,17 +117,14 @@
 
       <!-- Presets & I/O -->
       <div class="controls-section">
-        <div class="controls-section-title">Presets</div>
-
+        <div class="controls-section-title">Visual Presets</div>
         <div class="control-row" style="margin-bottom:8px;">
           <label for="preset-name">Name</label>
           <input type="text" id="preset-name" placeholder="My preset…" style="flex:1;">
         </div>
-
         <div class="preset-row" style="margin-bottom:8px;">
           <select id="preset-list" style="flex:1;min-width:0;"></select>
         </div>
-
         <div class="preset-row">
           <button id="btn-save-preset" class="btn btn-primary">Save</button>
           <button id="btn-load-preset" class="btn">Load</button>
@@ -134,29 +133,34 @@
 
         <div class="section-divider"></div>
         <div class="controls-section-title">Import / Export</div>
-
         <div class="controls-actions">
-          <button id="btn-export-ws" class="btn" title="Export full workspace (text + settings)">↑ Workspace</button>
+          <button id="btn-export-ws" class="btn" title="Export workspace JSON">↑ Workspace</button>
           <button id="btn-import-ws" class="btn" title="Import workspace JSON">↓ Workspace</button>
           <input type="file" id="file-import-ws" accept=".json" style="display:none;">
-
-          <button id="btn-export-visual" class="btn" title="Export visual preset JSON">↑ Visual</button>
-          <button id="btn-import-visual" class="btn" title="Import visual preset JSON">↓ Visual</button>
+          <button id="btn-export-visual" class="btn" title="Export visual preset">↑ Visual</button>
+          <button id="btn-import-visual" class="btn" title="Import visual preset">↓ Visual</button>
           <input type="file" id="file-import-visual" accept=".json" style="display:none;">
         </div>
-
         <div class="section-divider"></div>
-
         <div class="controls-actions">
-          <button id="btn-select-folder" class="btn" title="Link a folder to auto-sync presets">
-            📁 Link folder
-          </button>
+          <button id="btn-select-folder" class="btn" title="Link a folder to auto-sync presets">📁 Link folder</button>
           <button id="btn-reset-all" class="btn btn-danger">Reset all</button>
         </div>
       </div>
 
-    </div><!-- /.controls-panel -->
-  </div><!-- /.controls-wrapper -->
+    </div>
+  </div>
+
+  <!-- ── FIND & REPLACE ── -->
+  <div id="find-bar" class="find-bar hidden">
+    <input type="text" id="find-input"   placeholder="Find…"    style="width:150px;">
+    <span class="find-bar-sep">→</span>
+    <input type="text" id="replace-input" placeholder="Replace…" style="width:150px;">
+    <button id="btn-replace-one"  class="btn" style="padding:4px 8px;">Replace</button>
+    <button id="btn-replace-all"  class="btn" style="padding:4px 8px;">All</button>
+    <span id="find-count" class="find-count"></span>
+    <button id="btn-find-close" class="btn btn-ghost btn-icon" style="margin-left:auto;width:24px;height:24px;">✕</button>
+  </div>
 
   <!-- ── PAD GRID ── -->
   <div class="grid-wrapper">
@@ -165,14 +169,13 @@
 
   <!-- ── STATUS BAR ── -->
   <div class="status-bar">
-    <span id="status-saved" style="opacity:0.6;"></span>
+    <span id="status-saved" style="opacity:0.7;"></span>
     <span id="status-words"></span>
-    <span style="margin-left:auto;opacity:0.5;" title="Ctrl+Shift+F = focus mode, Esc = exit">Ctrl+Shift+F — focus mode</span>
+    <span style="margin-left:auto;opacity:0.5;" title="Ctrl+Shift+F = focus, Esc = exit, Ctrl+H = find">Ctrl+Shift+F · Ctrl+H</span>
   </div>
 
 </div><!-- /.app-shell -->
 
-<!-- Toast container -->
 <div id="toast-container" class="toast-container"></div>
 
 <script type="module" src="app.js"></script>
