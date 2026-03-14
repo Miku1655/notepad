@@ -835,6 +835,14 @@ select { cursor: pointer; }
                 border-color var(--transition);
   }
 
+  /* collapsed = ukryty poza ekranem (domyślnie już jest transform: -100%) */
+  .sidebar.collapsed {
+    transform: translateX(-100%);
+    box-shadow: none;
+    width: var(--sidebar-width); /* zachowaj szerokość, tylko przesuń */
+    border-right-color: var(--border);
+  }
+
   /* Gdy NIE jest collapsed = jest otwarta = wysuwa się */
   .sidebar:not(.collapsed) {
     transform: translateX(0);
@@ -881,6 +889,12 @@ select { cursor: pointer; }
     gap: 8px;
     /* Zabezpieczenie na notch */
     padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  /* Przycisk toggle zawsze nad sidebarem */
+  .sidebar-toggle {
+    position: relative;
+    z-index: 300;
   }
 
   .app-title {
