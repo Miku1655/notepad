@@ -584,14 +584,6 @@ body.focus-mode .pad.focus-active { display: flex; }
 .section-divider { width: 100%; height: 1px; background: var(--border); margin: 8px 0; }
 select { cursor: pointer; }
 
-@media (max-width: 700px) {
-  .sidebar { position: fixed; left: 0; top: 0; height: 100vh; z-index: 200; }
-  .sidebar.collapsed { transform: translateX(-100%); width: var(--sidebar-width); }
-  .controls-panel { flex-direction: column; }
-  .controls-section { border-right: none; border-bottom: 1px solid var(--border); padding: 10px 0; }
-  .controls-section:last-child { border-bottom: none; }
-}
-
 /* ── AUTH MODAL ──────────────────────────────────── */
 
 .auth-modal {
@@ -815,4 +807,364 @@ select { cursor: pointer; }
 @keyframes syncPulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
+}
+
+/* ═══════════════════════════════════════════════════
+   MOBILE STYLES — max-width: 700px
+   Wszystkie poniższe reguły dotyczą wyłącznie telefonów.
+   ═══════════════════════════════════════════════════ */
+
+@media (max-width: 700px) {
+
+  /* ── Sidebar: wysuwa się jako overlay ── */
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    height: 100dvh; /* dynamic viewport height — fixes iOS browser bar */
+    width: var(--sidebar-width);
+    z-index: 200;
+    /* Domyślnie ukryta poza ekranem */
+    transform: translateX(-100%);
+    /* Cień gdy otwarta */
+    box-shadow: none;
+    transition: transform 280ms cubic-bezier(0.4,0,0.2,1),
+                box-shadow 280ms ease,
+                background var(--transition),
+                border-color var(--transition);
+  }
+
+  /* Gdy NIE jest collapsed = jest otwarta = wysuwa się */
+  .sidebar:not(.collapsed) {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.15);
+  }
+
+  /* Overlay-ciemnienie tła gdy sidebar otwarty */
+  .sidebar:not(.collapsed)::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    left: var(--sidebar-width);
+    background: rgba(0,0,0,0.25);
+    z-index: -1;
+    animation: fadeIn 200ms ease both;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* Przyciski w sidebar — większy tap target */
+  .project-item {
+    padding: 10px 8px;
+    min-height: 44px;
+  }
+
+  .project-delete {
+    /* Zawsze widoczny na mobile (brak hover) */
+    opacity: 0.5;
+    padding: 6px 8px;
+    font-size: 14px;
+  }
+
+  .sidebar-new-btn {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  /* ── Header ── */
+  .app-header {
+    padding: 10px 14px 0;
+    gap: 8px;
+    /* Zabezpieczenie na notch */
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .app-title {
+    font-size: 14px;
+    /* Pozwalamy tytułowi się skracać */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 140px;
+  }
+
+  /* Ukryj hint skrótów klawiszowych na mobile */
+  .status-bar span:last-child {
+    display: none;
+  }
+
+  /* ── Panel ustawień: pionowy stos sekcji ── */
+  .controls-wrapper {
+    padding: 8px 14px 0;
+    max-height: 75vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .controls-panel {
+    flex-direction: column;
+    border-radius: 10px;
+    padding: 10px 12px;
+    gap: 0;
+  }
+
+  .controls-section {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+    min-width: 0;
+  }
+
+  .controls-section:first-child { padding-top: 4px; }
+  .controls-section:last-child {
+    border-bottom: none;
+    padding-bottom: 4px;
+  }
+
+  /* Etykiety — pełna szerokość, inputy obok */
+  .control-row {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .control-row label {
+    min-width: 72px;
+    font-size: 12px;
+  }
+
+  /* Inputy tekstowe i select — pełna dostępna szerokość */
+  .control-row input[type="text"],
+  .control-row select {
+    flex: 1;
+    font-size: 13px;
+    padding: 6px 8px;
+    min-height: 36px;
+  }
+
+  .control-row input[type="number"] {
+    width: 58px;
+    min-height: 36px;
+    font-size: 13px;
+    padding: 6px 6px;
+  }
+
+  input[type="color"] {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Szybkie layouty — przewijane poziomo */
+  .layout-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    gap: 6px;
+  }
+
+  .layout-chip {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+    min-height: 34px;
+  }
+
+  /* Przyciski akcji — większe tap targety */
+  .btn {
+    padding: 7px 13px;
+    font-size: 12px;
+    min-height: 36px;
+  }
+
+  .btn-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .controls-actions {
+    gap: 6px;
+  }
+
+  .controls-actions .btn {
+    flex: 1 1 auto;
+    text-align: center;
+    justify-content: center;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Preset row */
+  .preset-row {
+    gap: 6px;
+  }
+
+  .preset-row select {
+    min-height: 36px;
+    font-size: 13px;
+  }
+
+  /* ── Grid padów: zawsze 1 kolumna na mobile ── */
+  .grid-wrapper {
+    padding: 10px 14px;
+    /* Dolny padding uwzględnia iOS home indicator */
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .pad-grid {
+    /* Wymuszamy 1 kolumnę niezależnie od ustawienia użytkownika */
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+
+  /* Pady wyższe na mobile, żeby dało się pisać */
+  .pad {
+    height: max(220px, 35vh);
+  }
+
+  /* Przyciski pada zawsze widoczne (brak hover na dotyk) */
+  .pad-actions {
+    opacity: 1;
+  }
+
+  .pad-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+  }
+
+  /* Textarea — większa czcionka żeby iOS nie zoomował przy fokusie */
+  textarea {
+    font-size: max(16px, var(--pad-font-size));
+    padding: 14px;
+  }
+
+  /* ── Find bar — pionowe na mobile ── */
+  .find-bar {
+    flex-wrap: wrap;
+    max-height: none;
+    padding: 8px 14px;
+    gap: 6px;
+    row-gap: 6px;
+  }
+
+  .find-bar.hidden {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .find-bar input[type="text"] {
+    width: calc(50% - 3px);
+    flex-shrink: 1;
+    min-height: 36px;
+    font-size: 14px;
+  }
+
+  .find-bar-sep {
+    display: none;
+  }
+
+  #btn-replace-one,
+  #btn-replace-all {
+    flex: 1;
+    min-height: 36px;
+    text-align: center;
+  }
+
+  #btn-find-close {
+    margin-left: 0;
+  }
+
+  .find-count {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* ── Status bar ── */
+  .status-bar {
+    padding: 4px 14px 6px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    gap: 8px;
+    font-size: 10px;
+  }
+
+  /* ── Auth modal — pełnoekranowy na małych telefonach ── */
+  .auth-card {
+    margin: 16px;
+    max-width: calc(100vw - 32px);
+    padding: 24px 20px 20px;
+    border-radius: 14px;
+  }
+
+  .auth-form input[type="email"],
+  .auth-form input[type="password"] {
+    font-size: 16px; /* zapobiega zoom na iOS */
+    padding: 10px 12px;
+    min-height: 44px;
+  }
+
+  .auth-submit {
+    min-height: 44px;
+    font-size: 14px;
+  }
+
+  /* ── User menu dropdown — wyrównany do prawej ── */
+  .user-menu-drop {
+    right: 0;
+    min-width: 180px;
+  }
+
+  /* ── Toast — na dole ze safe area ── */
+  .toast-container {
+    bottom: max(20px, env(safe-area-inset-bottom, 20px));
+    right: 14px;
+    left: 14px;
+  }
+
+  .toast {
+    text-align: center;
+    font-size: 13px;
+  }
+
+  /* ── Focus mode na mobile ── */
+  body.focus-mode .grid-wrapper {
+    padding: 0;
+    height: 100dvh;
+  }
+
+  body.focus-mode .pad {
+    height: 100dvh !important;
+  }
+
+  body.focus-mode textarea {
+    /* Bez zoom na iOS */
+    font-size: max(16px, var(--pad-font-size));
+  }
+}
+
+/* ── Bardzo małe ekrany (< 380px) ── */
+@media (max-width: 380px) {
+  .app-title {
+    max-width: 100px;
+    font-size: 13px;
+  }
+
+  .header-actions {
+    gap: 2px;
+  }
+
+  .btn-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .control-row label {
+    min-width: 62px;
+  }
 }
