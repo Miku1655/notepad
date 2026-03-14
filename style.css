@@ -591,3 +591,228 @@ select { cursor: pointer; }
   .controls-section { border-right: none; border-bottom: 1px solid var(--border); padding: 10px 0; }
   .controls-section:last-child { border-bottom: none; }
 }
+
+/* ── AUTH MODAL ──────────────────────────────────── */
+
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  backdrop-filter: blur(2px);
+}
+.auth-modal.open  { opacity: 1; }
+.auth-modal.hidden { display: none; }
+
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 28px 28px;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: authCardIn 200ms ease both;
+}
+
+@keyframes authCardIn {
+  from { transform: translateY(12px) scale(0.98); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+.auth-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.auth-cloud-icon {
+  font-size: 28px;
+  text-align: center;
+  margin-bottom: 4px;
+  opacity: 0.6;
+}
+
+.auth-title {
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+  margin-bottom: 2px;
+}
+
+.auth-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.auth-form input[type="email"],
+.auth-form input[type="password"] {
+  width: 100%;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.auth-form input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.auth-error {
+  font-size: 11px;
+  color: var(--danger);
+  min-height: 16px;
+  text-align: center;
+}
+
+.auth-submit {
+  width: 100%;
+  padding: 9px;
+  font-size: 13px;
+  border-radius: 8px;
+  margin-top: 2px;
+}
+.auth-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.auth-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+  margin-top: 6px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color var(--transition);
+}
+.auth-toggle:hover { color: var(--text); }
+
+/* ── USER MENU (cloud button + dropdown) ─────────── */
+
+.user-menu-wrap {
+  position: relative;
+}
+
+.user-btn {
+  font-size: 16px;
+  transition: color var(--transition), background var(--transition);
+}
+.user-btn.signed-in {
+  color: var(--accent);
+}
+
+.user-menu-drop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: dropIn 150ms ease both;
+}
+.user-menu-drop.hidden { display: none; }
+
+@keyframes dropIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.user-menu-email {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-menu-logout {
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--danger);
+}
+.user-menu-logout:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+/* ── SYNC INDICATOR ──────────────────────────────── */
+
+.sync-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--accent-light);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6abf69;
+  flex-shrink: 0;
+  transition: background 300ms;
+}
+
+.sync-indicator.syncing .sync-dot {
+  background: var(--accent);
+  animation: syncPulse 800ms ease-in-out infinite;
+}
+.sync-indicator.syncing .sync-label::after {
+  content: 'Syncing…';
+}
+.sync-indicator:not(.syncing) .sync-label::after {
+  content: 'Synced';
+}
+.sync-label { font-size: 11px; color: var(--text-muted); }
+/* hide the base text since we use ::after */
+.sync-label { font-size: 0; }
+.sync-label::after { font-size: 11px; }
+
+@keyframes syncPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}

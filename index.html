@@ -8,6 +8,23 @@
 </head>
 <body>
 
+<!-- ── AUTH MODAL ── -->
+<div id="auth-modal" class="auth-modal hidden">
+  <div class="auth-card">
+    <button id="auth-modal-close" class="auth-close btn btn-ghost btn-icon">✕</button>
+    <div class="auth-cloud-icon">☁</div>
+    <h2 id="auth-title" class="auth-title">Sign in to sync</h2>
+    <p class="auth-subtitle">Projects and presets sync across all your devices.</p>
+    <form id="auth-form" class="auth-form" novalidate>
+      <input id="auth-email"    type="email"    placeholder="Email"    autocomplete="email"            required>
+      <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <p id="auth-error" class="auth-error"></p>
+      <button id="btn-auth-submit" type="submit" class="btn btn-primary auth-submit">Sign in</button>
+    </form>
+    <button id="btn-auth-toggle" class="auth-toggle">Don't have an account? Register</button>
+  </div>
+</div>
+
 <!-- ── SIDEBAR ── -->
 <aside id="sidebar" class="sidebar">
   <div class="sidebar-header">
@@ -34,6 +51,20 @@
     >N-Pane Draft Workspace</span>
     <div class="header-actions">
       <button id="btn-find" class="btn btn-ghost btn-icon" title="Find & Replace (Ctrl+H)">⌕</button>
+
+      <!-- Sync / user button -->
+      <div class="user-menu-wrap">
+        <button id="btn-user-menu" class="btn btn-ghost btn-icon user-btn" title="Sign in to sync">☁</button>
+        <div id="user-menu-drop" class="user-menu-drop hidden">
+          <div id="user-menu-email" class="user-menu-email"></div>
+          <div id="sync-indicator" class="sync-indicator">
+            <span class="sync-dot"></span>
+            <span class="sync-label">Synced</span>
+          </div>
+          <button id="btn-logout" class="btn btn-ghost user-menu-logout">Sign out</button>
+        </div>
+      </div>
+
       <button id="controls-toggle" class="btn btn-ghost btn-icon" aria-expanded="true" title="Toggle settings">⚙</button>
     </div>
   </header>

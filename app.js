@@ -1,5 +1,5 @@
 /**
- * app.js — N-Pane Draft Workspace
+ * app.js — N-Pane Draft Workspace (with Firebase Sync)
  */
 
 import {
@@ -15,6 +15,13 @@ import {
   applySetting, applyAllSettings, refreshUIPalette,
   collectVisualSettings, collectAllSettings,
 } from './settings.js';
+
+import {
+  currentUser, onUserChange, onProjectsSync, onPresetsSync,
+  login, register, logout,
+  syncSaveProject, syncDeleteProject,
+  syncSavePreset, syncDeletePreset, fetchAllPresets,
+} from './firebase.js';
 
 // ── DOM refs ───────────────────────────────────────
 
@@ -38,6 +45,22 @@ const btnReplaceAll  = document.getElementById('btn-replace-all');
 const findCount      = document.getElementById('find-count');
 const btnFindClose   = document.getElementById('btn-find-close');
 const btnFind        = document.getElementById('btn-find');
+
+// Auth UI
+const authModal      = document.getElementById('auth-modal');
+const authForm       = document.getElementById('auth-form');
+const authEmail      = document.getElementById('auth-email');
+const authPassword   = document.getElementById('auth-password');
+const btnAuthSubmit  = document.getElementById('btn-auth-submit');
+const btnAuthToggle  = document.getElementById('btn-auth-toggle');
+const authTitle      = document.getElementById('auth-title');
+const authError      = document.getElementById('auth-error');
+const authModalClose = document.getElementById('auth-modal-close');
+const btnUserMenu    = document.getElementById('btn-user-menu');
+const userMenuDrop   = document.getElementById('user-menu-drop');
+const userMenuEmail  = document.getElementById('user-menu-email');
+const btnLogout      = document.getElementById('btn-logout');
+const syncIndicator  = document.getElementById('sync-indicator');
 
 const ctrl = {
   font:        document.getElementById('ctrl-font'),
@@ -71,11 +94,13 @@ const layoutChips     = document.querySelectorAll('[data-layout]');
 
 // ── State ──────────────────────────────────────────
 
-let focusMode       = false;
-let focusPad        = null;
-let saveTimer       = null;
-let syncScrolling   = false;   // prevent re-entrant scroll sync
-let currentProjectId = null;   // null = unsaved / new workspace
+let focusMode        = false;
+let focusPad         = null;
+let saveTimer        = null;
+let syncScrolling    = false;
+let currentProjectId = null;
+let authMode         = 'login';    // 'login' | 'register'
+let isSyncing        = false;
 
 // ── Toast ──────────────────────────────────────────
 
@@ -88,6 +113,13 @@ function toast(msg, type = '') {
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 250); }, 2500);
 }
 
+// ── Sync indicator ─────────────────────────────────
+
+function setSyncing(active) {
+  isSyncing = active;
+  if (syncIndicator) syncIndicator.classList.toggle('syncing', active);
+}
+
 // ── Save ───────────────────────────────────────────
 
 function scheduleSave() {
@@ -95,14 +127,28 @@ function scheduleSave() {
   saveTimer = setTimeout(doSave, 400);
 }
 
-function doSave() {
+async function doSave() {
   const ws = collectWorkspace();
   saveWorkspaceLS(ws);
-  // Auto-update project if one is open
+
   if (currentProjectId) {
     saveProject({ ...ws, id: currentProjectId });
+
+    // Cloud sync
+    if (currentUser()) {
+      setSyncing(true);
+      try {
+        await syncSaveProject({ ...ws, id: currentProjectId });
+      } catch (e) {
+        console.warn('[npane] cloud save failed', e);
+      } finally {
+        setSyncing(false);
+      }
+    }
+
     renderProjectList();
   }
+
   const t = new Date();
   if (statusSaved) statusSaved.textContent = 'Saved ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   updateWordCount();
@@ -141,7 +187,6 @@ function createPad(index, content = '', labelText = '') {
   const actions = document.createElement('div');
   actions.className = 'pad-actions';
 
-  // Sync scroll toggle
   const syncBtn = document.createElement('button');
   syncBtn.className = 'pad-btn';
   syncBtn.title = 'Toggle sync scroll with other pads';
@@ -149,18 +194,15 @@ function createPad(index, content = '', labelText = '') {
   syncBtn.addEventListener('click', () => {
     syncBtn.classList.toggle('active');
     wrap.dataset.syncScroll = syncBtn.classList.contains('active') ? '1' : '';
-    const any = [...padGrid.querySelectorAll('.pad')].some(p => p.dataset.syncScroll);
     wrap.classList.toggle('sync-scroll-active', !!wrap.dataset.syncScroll);
   });
 
-  // Focus mode
   const focusBtn = document.createElement('button');
   focusBtn.className = 'pad-btn';
   focusBtn.title = 'Focus mode (Ctrl+Shift+F)';
   focusBtn.innerHTML = '⛶';
   focusBtn.addEventListener('click', () => enterFocusMode(wrap));
 
-  // Clear
   const clearBtn = document.createElement('button');
   clearBtn.className = 'pad-btn';
   clearBtn.title = 'Clear pad';
@@ -186,7 +228,6 @@ function createPad(index, content = '', labelText = '') {
     updatePadWordCount(wrap);
   });
 
-  // Sync scroll
   ta.addEventListener('scroll', () => {
     if (syncScrolling) return;
     if (!wrap.dataset.syncScroll) return;
@@ -371,10 +412,13 @@ function renderProjectList() {
     del.className = 'project-delete';
     del.title = 'Delete project';
     del.textContent = '✕';
-    del.addEventListener('click', e => {
+    del.addEventListener('click', async e => {
       e.stopPropagation();
       if (confirm(`Delete "${p.title}"?`)) {
         deleteProject(p.id);
+        if (currentUser()) {
+          try { await syncDeleteProject(p.id); } catch {}
+        }
         if (currentProjectId === p.id) currentProjectId = null;
         renderProjectList();
         toast(`"${p.title}" deleted`);
@@ -391,7 +435,6 @@ function renderProjectList() {
 function openProject(id) {
   const data = loadProject(id);
   if (!data) { toast('Project not found', 'error'); return; }
-  // Save current state before switching
   if (currentProjectId) doSave();
   applyWorkspace(data, { applyVisuals: true });
   currentProjectId = id;
@@ -400,18 +443,28 @@ function openProject(id) {
   toast(`Opened "${data.title}"`);
 }
 
-btnSaveProject.addEventListener('click', () => {
+btnSaveProject.addEventListener('click', async () => {
   const ws = collectWorkspace();
   const id = saveProject({ ...ws, id: currentProjectId });
   currentProjectId = id;
+  if (currentUser()) {
+    setSyncing(true);
+    try {
+      await syncSaveProject({ ...ws, id });
+      toast(`Saved "${ws.title}" ☁`);
+    } catch {
+      toast(`Saved "${ws.title}" (offline)`);
+    } finally {
+      setSyncing(false);
+    }
+  } else {
+    toast(`Saved "${ws.title}"`);
+  }
   renderProjectList();
-  toast(`Saved "${ws.title}"`);
 });
 
 btnNewProject.addEventListener('click', () => {
-  // Save current first
   if (currentProjectId) doSave();
-  // Start fresh
   currentProjectId = null;
   titleEl.textContent = 'New Project';
   applyAllSettings(DEFAULTS);
@@ -539,7 +592,6 @@ btnFind.addEventListener('click', () => {
 // ── Keyboard shortcuts ─────────────────────────────
 
 document.addEventListener('keydown', e => {
-  // Focus mode toggle
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     if (focusMode) exitFocusMode();
@@ -550,20 +602,18 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  // Escape
   if (e.key === 'Escape') {
     if (focusMode) { exitFocusMode(); return; }
     if (!findBar.classList.contains('hidden')) { closeFindBar(); return; }
+    if (authModal && !authModal.classList.contains('hidden')) { closeAuthModal(); return; }
   }
 
-  // Find & replace
   if (e.ctrlKey && e.key.toLowerCase() === 'h') {
     e.preventDefault();
     findBar.classList.contains('hidden') ? openFindBar() : closeFindBar();
     return;
   }
 
-  // Jump between pads: Ctrl+Arrow
   if (e.ctrlKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
     const pads = [...padGrid.querySelectorAll('.pad')];
     const current = document.activeElement?.closest?.('.pad');
@@ -584,7 +634,6 @@ Object.entries(ctrl).forEach(([key, el]) => {
   el.addEventListener('input', () => {
     applySetting(key, el.value);
 
-    // Re-derive full UI palette whenever a color or bg changes
     if (['bgColor', 'paperColor', 'textColor', 'borderColor'].includes(key)) {
       refreshUIPalette(ctrl.bgColor.value, ctrl.paperColor.value, ctrl.textColor.value, ctrl.borderColor.value);
     }
@@ -607,13 +656,27 @@ btnSavePreset.addEventListener('click', async () => {
   if (!name) { toast('Enter a preset name first', 'error'); return; }
   const data = { settings: collectVisualSettings(ctrl) };
   saveLocalPreset(name, data);
+
+  // Cloud sync
+  if (currentUser()) {
+    setSyncing(true);
+    try {
+      await syncSavePreset(name, data);
+      toast(`Preset "${name}" saved ☁`);
+    } catch {
+      toast(`Preset "${name}" saved (offline)`);
+    } finally {
+      setSyncing(false);
+    }
+  } else {
+    toast(`Preset "${name}" saved`);
+  }
+
   const dirHandle = await getHandle('presetsFolder');
   if (dirHandle) {
-    try { await savePresetToFolder(dirHandle, name, data); }
-    catch { toast('Saved locally (folder write failed)', 'error'); }
+    try { await savePresetToFolder(dirHandle, name, data); } catch {}
   }
   refreshPresetList();
-  toast(`Preset "${name}" saved`);
 });
 
 btnLoadPreset.addEventListener('click', () => {
@@ -629,6 +692,9 @@ btnDeletePreset.addEventListener('click', async () => {
   const name = presetList.value;
   if (!name || !confirm(`Delete preset "${name}"?`)) return;
   deleteLocalPreset(name);
+  if (currentUser()) {
+    try { await syncDeletePreset(name); } catch {}
+  }
   const dirHandle = await getHandle('presetsFolder');
   if (dirHandle) { try { await deletePresetFromFolder(dirHandle, name); } catch {} }
   refreshPresetList();
@@ -712,6 +778,149 @@ btnResetAll.addEventListener('click', () => {
   toast('Reset to defaults');
 });
 
+// ── Auth Modal ─────────────────────────────────────
+
+function openAuthModal(mode = 'login') {
+  authMode = mode;
+  authError.textContent = '';
+  authEmail.value = '';
+  authPassword.value = '';
+  updateAuthModalText();
+  authModal.classList.remove('hidden');
+  requestAnimationFrame(() => authModal.classList.add('open'));
+  authEmail.focus();
+}
+
+function closeAuthModal() {
+  authModal.classList.remove('open');
+  setTimeout(() => authModal.classList.add('hidden'), 200);
+}
+
+function updateAuthModalText() {
+  if (authMode === 'login') {
+    authTitle.textContent     = 'Sign in to sync';
+    btnAuthSubmit.textContent = 'Sign in';
+    btnAuthToggle.textContent = "Don't have an account? Register";
+  } else {
+    authTitle.textContent     = 'Create account';
+    btnAuthSubmit.textContent = 'Create account';
+    btnAuthToggle.textContent = 'Already have an account? Sign in';
+  }
+}
+
+btnAuthToggle.addEventListener('click', () => {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  updateAuthModalText();
+  authError.textContent = '';
+});
+
+authModalClose.addEventListener('click', closeAuthModal);
+authModal.addEventListener('click', e => { if (e.target === authModal) closeAuthModal(); });
+
+authForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  authError.textContent = '';
+  const email    = authEmail.value.trim();
+  const password = authPassword.value;
+  if (!email || !password) { authError.textContent = 'Enter email and password.'; return; }
+
+  btnAuthSubmit.disabled = true;
+  btnAuthSubmit.textContent = authMode === 'login' ? 'Signing in…' : 'Creating…';
+
+  try {
+    if (authMode === 'login') {
+      await login(email, password);
+    } else {
+      await register(email, password);
+    }
+    closeAuthModal();
+    toast('Signed in ☁');
+  } catch (err) {
+    authError.textContent = friendlyAuthError(err.code);
+  } finally {
+    btnAuthSubmit.disabled = false;
+    updateAuthModalText();
+  }
+});
+
+function friendlyAuthError(code) {
+  switch (code) {
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Incorrect email or password.';
+    case 'auth/email-already-in-use': return 'Email already registered. Try signing in.';
+    case 'auth/weak-password': return 'Password must be at least 6 characters.';
+    case 'auth/invalid-email': return 'Enter a valid email address.';
+    case 'auth/too-many-requests': return 'Too many attempts. Try again later.';
+    default: return 'Something went wrong. Try again.';
+  }
+}
+
+// ── User menu ──────────────────────────────────────
+
+function updateUserUI(user) {
+  if (user) {
+    btnUserMenu.textContent = '☁';
+    btnUserMenu.title = user.email;
+    btnUserMenu.classList.add('signed-in');
+    if (userMenuEmail) userMenuEmail.textContent = user.email;
+  } else {
+    btnUserMenu.textContent = '☁';
+    btnUserMenu.title = 'Sign in to sync';
+    btnUserMenu.classList.remove('signed-in');
+  }
+}
+
+btnUserMenu.addEventListener('click', e => {
+  e.stopPropagation();
+  if (!currentUser()) {
+    openAuthModal('login');
+    return;
+  }
+  userMenuDrop.classList.toggle('hidden');
+});
+
+document.addEventListener('click', () => {
+  if (userMenuDrop) userMenuDrop.classList.add('hidden');
+});
+
+btnLogout.addEventListener('click', async () => {
+  userMenuDrop.classList.add('hidden');
+  await logout();
+  toast('Signed out');
+});
+
+// ── Firebase listeners ─────────────────────────────
+
+onUserChange(user => {
+  updateUserUI(user);
+
+  if (!user) return;
+
+  // When user logs in, pull their cloud data into local storage
+  // We use the real-time listeners set up in firebase.js
+});
+
+// Merge cloud projects into local (cloud wins on conflict by savedAt)
+onProjectsSync(cloudProjects => {
+  cloudProjects.forEach(cp => {
+    const local = loadProject(cp.id);
+    // Cloud wins if it's newer or local doesn't exist
+    if (!local || (cp.savedAt && cp.savedAt > (local.savedAt || 0))) {
+      saveProject(cp);
+    }
+  });
+  renderProjectList();
+});
+
+// Merge cloud presets into local
+onPresetsSync(cloudPresets => {
+  Object.entries(cloudPresets).forEach(([name, data]) => {
+    saveLocalPreset(name, data);
+  });
+  refreshPresetList();
+});
+
 // ── Utilities ──────────────────────────────────────
 
 function download(filename, text) {
@@ -732,18 +941,15 @@ function readJSON(file, cb) {
 // ── Boot ───────────────────────────────────────────
 
 async function init() {
-  // Restore sidebar visibility
   if (localStorage.getItem('npane-sidebar-hidden') === '1') {
     sidebar.classList.add('collapsed');
   }
 
-  // Restore controls visibility
   if (localStorage.getItem('npane-controls-hidden') === '1') {
     controlsWrap.classList.add('collapsed');
     toggleBtn.setAttribute('aria-expanded', 'false');
   }
 
-  // Load workspace
   const saved = loadWorkspaceLS();
   if (saved) {
     applyWorkspace(saved, { applyVisuals: true });
@@ -758,6 +964,7 @@ async function init() {
 
   refreshPresetList();
   renderProjectList();
+  updateUserUI(currentUser());
 
   // Auto-load presets from persisted folder
   try {
